@@ -61,6 +61,18 @@ def repo_info(token, repo):
     return _req("GET", f"{API}/repos/{repo}", token=token)
 
 
+def app_webhook_config(app_id, key_path):
+    """Current App webhook config (url, content_type, insecure_ssl; secret is masked)."""
+    return _req("GET", f"{API}/app/hook/config", token=app_jwt(app_id, key_path))
+
+
+def set_app_webhook_url(app_id, key_path, url):
+    """Re-point the App's webhook. Used when a quick tunnel hands out a new hostname.
+    The Marketplace listing webhook has no API and must be updated in the UI."""
+    return _req("PATCH", f"{API}/app/hook/config", token=app_jwt(app_id, key_path),
+                body={"url": url, "content_type": "json"})
+
+
 def _git(args, cwd, token=None):
     env = dict(os.environ)
     cmd = ["git"]

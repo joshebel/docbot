@@ -7,13 +7,14 @@
   python -m worker jobs                       # dump queue
   python -m worker webhook                    # GitHub webhook receiver (install/push/marketplace)
   python -m worker accounts                   # dump account -> plan table
+  python -m worker supervise                  # run webhook + serve + tunnel, keep them alive
 """
 import shutil
 import sys
 import time
 from pathlib import Path
 
-from . import github, webhook
+from . import github, supervisor, webhook
 from .accounts import Accounts
 from .config import Config
 from .generate import Generator
@@ -125,6 +126,8 @@ def main(argv):
         return cmd_check(cfg)
     if cmd == "local":
         return cmd_local(cfg, *argv[1:3])
+    if cmd == "supervise":
+        return supervisor.run(cfg)
     q = SqliteQueue(cfg.queue_path)
     acct = Accounts(cfg.queue_path)
     if cmd == "webhook":
