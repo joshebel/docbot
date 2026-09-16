@@ -5,13 +5,16 @@
   python -m worker serve                      # poll loop
   python -m worker local <path> [out]         # generate docs for a local dir, no GitHub
   python -m worker jobs                       # dump queue
+  python -m worker webhook                    # GitHub webhook receiver (install/push/marketplace)
+  python -m worker accounts                   # dump account -> plan table
 """
 import shutil
 import sys
 import time
 from pathlib import Path
 
-from . import github
+from . import github, webhook
+from .accounts import Accounts
 from .config import Config
 from .generate import Generator
 from .ingest import RepoTooLarge, scan
@@ -35,12 +38,12 @@ def _rmtree(p: Path):
         shutil.rmtree(p, onexc=lambda f, x, e: (Path(x).chmod(0o700), f(x)))
 
 
-def process(cfg, router, jlog, job, queue_depth):
+def process(cfg, router, jlog, job, queue_depth, plan="free"):
     t0 = time.time()
-    backend = router.pick(queue_depth)
+    backend = router.pick(queue_depth, plan)
     dest = cfg.work_dir / job.repo.replace("/", "__")
     _rmtree(dest)
-    rec = dict(job=job.id, repo=job.repo, model=backend.model, backend=backend.name)
+    rec = dict(job=job.id, repo=job.repo, model=backend.model, backend=backend.name, plan=plan)
     try:
         inst = job.installation_id or cfg.gh_installation_id
         token = github.installation_token(cfg.gh_app_id, cfg.gh_private_key_path, inst)
@@ -114,6 +117,14 @@ def main(argv):
     if cmd == "local":
         return cmd_local(cfg, *argv[1:3])
     q = SqliteQueue(cfg.queue_path)
+    acct = Accounts(cfg.queue_path)
+    if cmd == "webhook":
+        q.close(); acct.close()
+        return webhook.serve(cfg)
+    if cmd == "accounts":
+        for row in acct.all():
+            print("\t".join(str(c or "") for c in row))
+        return
     if cmd == "enqueue":
         j = q.enqueue(argv[1], cfg.gh_installation_id, argv[2] if len(argv) > 2 else "")
         print("queued", j.id, j.repo)
@@ -127,7 +138,8 @@ def main(argv):
             job = q.claim()
             if job:
                 try:
-                    url = process(cfg, router, jlog, job, q.depth())
+                    plan = acct.plan(job.repo.split("/")[0])
+                    url = process(cfg, router, jlog, job, q.depth(), plan)
                     q.complete(job.id, url)
                 except Exception as e:
                     info("job failed", repo=job.repo, err=repr(e))

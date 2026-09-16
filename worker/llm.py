@@ -1,6 +1,7 @@
 """Model backends + router. Local (OpenAI-compatible vLLM) is the default;
-Anthropic lane is wired but disabled. Spill rule: queue depth > N or local
-health-check fail -> paid lane, bounded by a daily $ cap tracked on disk."""
+the Anthropic lane is the paid tier. Spill rule: pro-plan job AND (queue depth
+> N or local health-check fail) -> paid lane, bounded by a daily $ cap tracked
+on disk. Free-plan jobs never leave the local box."""
 import json
 import time
 import urllib.error
@@ -26,8 +27,9 @@ class Backend:
     model = "?"
     usd_per_mtok_in = 0.0
     usd_per_mtok_out = 0.0
+    max_model_len = 32768
 
-    def chat(self, messages, max_tokens, temperature=0.2) -> tuple[str, Usage]:
+    def chat(self, messages, max_tokens, temperature=0.0) -> tuple[str, Usage]:
         raise NotImplementedError
 
     def healthy(self) -> bool:
@@ -78,7 +80,7 @@ class LocalBackend(Backend):
             info("local health-check failed", err=e)
             return False
 
-    def chat(self, messages, max_tokens, temperature=0.2):
+    def chat(self, messages, max_tokens, temperature=0.0):
         body = {
             "model": self.model, "messages": messages, "max_tokens": max_tokens,
             "temperature": temperature,
@@ -107,18 +109,72 @@ class LocalBackend(Backend):
 
 
 class AnthropicBackend(Backend):
-    """Stub. Enable by setting ANTHROPIC_API_KEY and SPILL_ENABLED=1.
-    Pricing placeholders; verify before turning on."""
+    """Paid lane. Messages API over urllib (stdlib, same as the other clients).
+    Model defaults to claude-opus-5; thinking is adaptive by default on that
+    model so we don't send a `thinking` field. Effort is capped at medium:
+    doc generation is routine work and effort is the main cost lever."""
     name = "anthropic"
-    usd_per_mtok_in = 3.0
-    usd_per_mtok_out = 15.0
+    API = "https://api.anthropic.com/v1/messages"
+    VERSION = "2023-06-01"
+    PRICES = {  # USD per MTok in/out, from the API pricing table (2026-06)
+        "claude-opus-5": (5.0, 25.0), "claude-opus-4-8": (5.0, 25.0),
+        "claude-sonnet-5": (2.0, 10.0), "claude-haiku-4-5": (1.0, 5.0),
+        "claude-fable-5-1": (10.0, 50.0),
+    }
+    max_model_len = 1_000_000
 
-    def __init__(self, api_key, model):
+    def __init__(self, api_key, model="claude-opus-5", effort="medium"):
         self.api_key = api_key
         self.model = model
+        self.effort = effort
+        self.usd_per_mtok_in, self.usd_per_mtok_out = self.PRICES.get(model, (10.0, 50.0))
 
-    def chat(self, messages, max_tokens, temperature=0.2):
-        raise NotImplementedError("Anthropic lane is stubbed; not implemented yet")
+    def healthy(self):
+        return bool(self.api_key)
+
+    def chat(self, messages, max_tokens, temperature=0.0):
+        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        turns = [m for m in messages if m["role"] != "system"]
+        body = {
+            "model": self.model, "max_tokens": max_tokens, "messages": turns,
+            "output_config": {"effort": self.effort},
+            # server-side refusal fallback: routes by refusal category, no model list to maintain
+            "fallbacks": "default",
+        }
+        if system:
+            body["system"] = system
+        headers = {
+            "Content-Type": "application/json", "x-api-key": self.api_key,
+            "anthropic-version": self.VERSION,
+            "anthropic-beta": "server-side-fallback-2026-07-01",
+        }
+        data = json.dumps(body).encode()
+        for attempt in range(3):
+            req = urllib.request.Request(self.API, data=data, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=600) as r:
+                    j = json.load(r)
+                break
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode(errors="replace")[:300]
+                if e.code in (408, 409, 429) or e.code >= 500:
+                    if attempt == 2:
+                        raise RuntimeError(f"anthropic {e.code}: {detail}") from None
+                    time.sleep(2 ** attempt * 2)
+                    continue
+                raise RuntimeError(f"anthropic {e.code}: {detail}") from None
+            except (urllib.error.URLError, TimeoutError):
+                if attempt == 2:
+                    raise
+                time.sleep(2 ** attempt)
+        if j.get("stop_reason") == "refusal":
+            raise RuntimeError(f"anthropic refused: {(j.get('stop_details') or {}).get('category')}")
+        text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
+        u = j.get("usage") or {}
+        served = j.get("model", self.model)
+        if served != self.model:
+            info("anthropic fallback served", model=served)
+        return text, Usage(u.get("input_tokens", 0), u.get("output_tokens", 0))
 
 
 class Spend:
@@ -150,16 +206,21 @@ class Router:
         self.cfg = cfg
         self.local = LocalBackend(cfg.local_base_url, cfg.local_api_key, cfg.local_model,
                                   cfg.local_enable_thinking)
-        self.paid = AnthropicBackend(cfg.anthropic_api_key, cfg.anthropic_model) \
+        self.paid = AnthropicBackend(cfg.anthropic_api_key, cfg.anthropic_model, cfg.anthropic_effort) \
             if cfg.anthropic_api_key else None
         self.spend = Spend(cfg.log_dir)
 
-    def pick(self, queue_depth: int) -> Backend:
-        spill = queue_depth > self.cfg.spill_queue_depth or not self.local.healthy()
-        if spill and self.cfg.spill_enabled and self.paid:
-            if self.spend.today() >= self.cfg.daily_usd_cap:
-                info("spill wanted but daily cap reached; staying local", spent=self.spend.today())
-                return self.local
-            info("spilling to paid lane", depth=queue_depth)
-            return self.paid
-        return self.local
+    def pick(self, queue_depth: int, plan: str = "free") -> Backend:
+        if plan == "free" or not (self.cfg.spill_enabled and self.paid):
+            return self.local
+        local_ok = self.local.healthy()
+        spill = queue_depth > self.cfg.spill_queue_depth or not local_ok
+        if not spill:
+            return self.local
+        if self.spend.today() >= self.cfg.daily_usd_cap:
+            info("spill wanted but daily cap reached; staying local", spent=round(self.spend.today(), 2))
+            if not local_ok:
+                raise RuntimeError("local backend down and daily paid cap reached")
+            return self.local
+        info("spilling to paid lane", depth=queue_depth, plan=plan)
+        return self.paid

@@ -33,12 +33,16 @@ class Config:
     local_enable_thinking: bool
     anthropic_api_key: str
     anthropic_model: str
+    anthropic_effort: str
     spill_enabled: bool
     spill_queue_depth: int
     daily_usd_cap: float
     gh_app_id: str
     gh_installation_id: str
     gh_private_key_path: str
+    gh_webhook_secret: str
+    webhook_bind: str
+    webhook_port: int
     docs_branch: str
     queue_path: Path
     work_dir: Path
@@ -57,13 +61,17 @@ class Config:
             local_model=_env("LOCAL_MODEL"),
             local_enable_thinking=_env("LOCAL_ENABLE_THINKING", "0") == "1",
             anthropic_api_key=_env("ANTHROPIC_API_KEY"),
-            anthropic_model=_env("ANTHROPIC_MODEL", "claude-sonnet-5"),
+            anthropic_model=_env("ANTHROPIC_MODEL", "claude-opus-5"),
+            anthropic_effort=_env("ANTHROPIC_EFFORT", "medium"),
             spill_enabled=_env("SPILL_ENABLED", "0") == "1",
             spill_queue_depth=_int("SPILL_QUEUE_DEPTH", 20),
             daily_usd_cap=float(_env("DAILY_USD_CAP") or 5),
             gh_app_id=_env("GH_APP_ID"),
             gh_installation_id=_env("GH_INSTALLATION_ID"),
             gh_private_key_path=_env("GH_APP_PRIVATE_KEY_PATH"),
+            gh_webhook_secret=_env("GH_WEBHOOK_SECRET"),
+            webhook_bind=_env("WEBHOOK_BIND", "0.0.0.0"),
+            webhook_port=_int("WEBHOOK_PORT", 8787),
             docs_branch=_env("DOCS_BRANCH", "docs/auto"),
             queue_path=Path(_env("QUEUE_PATH", "./state/queue.sqlite")),
             work_dir=Path(_env("WORK_DIR", "./work")),

@@ -26,6 +26,7 @@ class Queue:
     def complete(self, job_id, result=""): raise NotImplementedError
     def fail(self, job_id, err, retry=False): raise NotImplementedError
     def depth(self) -> int: raise NotImplementedError
+    def has_queued(self, repo) -> bool: raise NotImplementedError
     def list(self, limit=50) -> list: raise NotImplementedError
 
 
@@ -81,6 +82,11 @@ class SqliteQueue(Queue):
 
     def depth(self):
         return self.db.execute("SELECT COUNT(*) FROM jobs WHERE status='queued'").fetchone()[0]
+
+    def has_queued(self, repo):
+        return bool(self.db.execute(
+            "SELECT 1 FROM jobs WHERE repo=? AND status IN ('queued','running') LIMIT 1", (repo,)
+        ).fetchone())
 
     def list(self, limit=50):
         rows = self.db.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
