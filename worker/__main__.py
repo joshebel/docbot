@@ -8,13 +8,14 @@
   python -m worker webhook                    # GitHub webhook receiver (install/push/marketplace)
   python -m worker accounts                   # dump account -> plan table
   python -m worker supervise                  # run webhook + serve + tunnel, keep them alive
+  python -m worker pitch <url|path> [--client NAME] [--budget USD]   # freelance proposal draft
 """
 import shutil
 import sys
 import time
 from pathlib import Path
 
-from . import github, supervisor, webhook
+from . import github, pitch, supervisor, webhook
 from .accounts import Accounts
 from .config import Config
 from .generate import Generator
@@ -128,6 +129,9 @@ def main(argv):
         return cmd_local(cfg, *argv[1:3])
     if cmd == "supervise":
         return supervisor.run(cfg)
+    if cmd == "pitch":
+        opts = dict(zip(argv[2::2], argv[3::2]))
+        return pitch.run(cfg, argv[1], client=opts.get("--client", ""), budget=opts.get("--budget", ""))
     q = SqliteQueue(cfg.queue_path)
     acct = Accounts(cfg.queue_path)
     if cmd == "webhook":

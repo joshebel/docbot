@@ -6,3 +6,6 @@ state/
 work/
 out/
 bin/
+deliveries/
+freelance/pitches/*
+!freelance/pitches/click.md

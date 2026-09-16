@@ -41,6 +41,12 @@ Paid-lane spend ledger: `state/spend.json`.
 Plans are set by Marketplace purchase webhooks (`docs/MARKETPLACE.md`). Paid lane is off
 until `ANTHROPIC_API_KEY` is set and `SPILL_ENABLED=1`.
 
+## Freelance track
+
+The same pipeline sold as a fixed-price service ($350–$1,600 per repo). `freelance/` has the
+profile, gig tiers, proposal template and delivery workflow; `python -m worker pitch <repo>`
+drafts a repo-specific proposal; `examples/click/` is an unedited portfolio sample.
+
 ## Layout
 
 - `worker/config.py` env → Config

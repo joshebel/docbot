@@ -45,6 +45,8 @@ def _json_list(text: str) -> list:
 
 
 TEST_DIRS = {"tests", "test", "spec", "specs", "__tests__", "testing"}
+# not code modules: docs sites, hidden tooling dirs (.devcontainer, .github, ...)
+NON_MODULE_DIRS = TEST_DIRS | {"docs", "doc", "documentation", "site", "examples", "example", "samples"}
 
 
 def _modules(snap: Snapshot) -> dict:
@@ -55,7 +57,7 @@ def _modules(snap: Snapshot) -> dict:
         if f.lang in ("markdown", "rst", "text", "json", "yaml", "toml", "html", "css"):
             continue
         parts = Path(f.path).parts
-        if parts[0] in TEST_DIRS:
+        if parts[0] in NON_MODULE_DIRS or parts[0].startswith("."):
             continue
         key = parts[0] if len(parts) > 1 else "root"
         groups.setdefault(key, []).append(f)
