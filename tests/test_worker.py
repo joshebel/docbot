@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from worker import github, ingest, log, queue
-from worker.generate import _clean, _json_list
+from worker.generate import _clean, _json_list, _modules
 
 
 class TestQueue(unittest.TestCase):
@@ -42,6 +42,9 @@ class TestIngest(unittest.TestCase):
             self.assertNotIn("_p", sig)
             ctx = ingest.build_context(s, "t", 4000)
             self.assertIn("pkg/m.py", ctx)
+            (r / "tests").mkdir(); (r / "tests" / "t.py").write_text("def test_x(): pass\n")
+            s = ingest.scan(r, 10**7, 100, 10**5)
+            self.assertEqual(list(_modules(s)), ["pkg"])
 
     def test_cap(self):
         with tempfile.TemporaryDirectory() as d:

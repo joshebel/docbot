@@ -44,13 +44,19 @@ def _json_list(text: str) -> list:
         return []
 
 
+TEST_DIRS = {"tests", "test", "spec", "specs", "__tests__", "testing"}
+
+
 def _modules(snap: Snapshot) -> dict:
-    """Group code files by top-level directory (or 'root')."""
+    """Group code files by top-level directory (or 'root'). Test dirs are
+    covered by the README's development section, not their own page."""
     groups = {}
     for f in snap.files:
         if f.lang in ("markdown", "rst", "text", "json", "yaml", "toml", "html", "css"):
             continue
         parts = Path(f.path).parts
+        if parts[0] in TEST_DIRS:
+            continue
         key = parts[0] if len(parts) > 1 else "root"
         groups.setdefault(key, []).append(f)
     return groups
@@ -66,7 +72,8 @@ class Generator:
         self.prefix = SYSTEM_RULES + "\n\n" + build_context(snap, repo_name, context_tokens)
         self.res = Result()
 
-    def _call(self, user: str, max_tokens: int, temperature=0.2) -> str:
+    def _call(self, user: str, max_tokens: int, temperature=0.0) -> str:
+        # temperature 0: unchanged source -> (near-)identical docs -> clean no-op reruns
         text, u = self.b.chat(
             [{"role": "system", "content": self.prefix}, {"role": "user", "content": user}],
             max_tokens=max_tokens, temperature=temperature)
