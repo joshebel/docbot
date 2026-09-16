@@ -42,10 +42,10 @@ class Dispatcher:
         if p["action"] in ("deleted", "suspend"):
             return f"installation {p['action']} for {login}"
         self.acct.set_installation(login, inst["id"])
-        if p["action"] not in ("created", "unsuspend", "new_permissions_accepted"):
+        if p["action"] not in ("created", "unsuspend"):
             return f"installation {p['action']}"
         out = [self._enqueue(r["full_name"], inst["id"]) for r in p.get("repositories", [])]
-        return "; ".join(out) or "installation created (no repos)"
+        return "; ".join(out) or f"installation {p['action']} (no repos)"
 
     def on_installation_repositories(self, p):
         inst = p["installation"]
@@ -55,10 +55,11 @@ class Dispatcher:
     def on_push(self, p):
         repo = p["repository"]["full_name"]
         default = p["repository"].get("default_branch", "main")
+        # only the default branch; docbot's own pushes go to docs_branch so can't loop here
         if p.get("ref") != f"refs/heads/{default}":
             return f"ignored push to {p.get('ref')}"
-        if p.get("sender", {}).get("login", "").endswith("[bot]"):
-            return "ignored bot push"
+        if p.get("deleted"):
+            return "ignored branch delete"
         return self._enqueue(repo, p["installation"]["id"], default)
 
     def on_marketplace_purchase(self, p):

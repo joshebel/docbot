@@ -62,6 +62,15 @@ def process(cfg, router, jlog, job, queue_depth, plan="free"):
         # rerun = same branch, force-push
         msg = f"docs: regenerate (source {sha[:7]})"
         new_sha = github.commit_and_push(token, dest, cfg.docs_branch, msg, list(res.files))
+        if new_sha is None:
+            # generated docs identical to what's on `base` (e.g. the docs PR was just merged):
+            # nothing to push and an empty PR would be rejected, so stop here
+            rec.update(status="no_change", files_sent=res.files_sent, tokens_in=res.usage.prompt,
+                       tokens_out=res.usage.completion, calls=res.calls, wall_s=round(time.time() - t0, 1))
+            router.spend.add(backend.cost(res.usage))
+            jlog.write(**rec)
+            info("job done, no doc changes", repo=job.repo)
+            return "no_change"
         body = (f"Auto-generated documentation from `{base}` @ `{sha[:7]}`.\n\n"
                 f"Files: {', '.join(res.files)}\n\n"
                 f"Model: `{backend.model}` · {res.calls} calls · "

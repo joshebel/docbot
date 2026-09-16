@@ -50,9 +50,10 @@ class TestDispatcher(unittest.TestCase):
         base = {"repository": {"full_name": "x/y", "default_branch": "main"},
                 "installation": {"id": 1}, "sender": {"login": "x"}}
         self.assertIn("ignored", self.d.handle("push", {**base, "ref": "refs/heads/docs/auto"}))
+        self.assertIn("ignored branch delete", self.d.handle("push", {**base, "ref": "refs/heads/main", "deleted": True}))
+        # pushes made with the App's own token still count: only the ref matters
         bot = {**base, "ref": "refs/heads/main", "sender": {"login": "docbot[bot]"}}
-        self.assertIn("ignored bot", self.d.handle("push", bot))
-        self.assertIn("queued", self.d.handle("push", {**base, "ref": "refs/heads/main"}))
+        self.assertIn("queued", self.d.handle("push", bot))
         self.assertEqual(self.q.list()[0].ref, "main")
 
     def test_marketplace_plans(self):
